@@ -1,11 +1,11 @@
 import React from 'react'
 
-const EmployeeTable = () => {
+const employeeTable = () => {
   return (
     <div>
-        <h2>Employee Table</h2>
+        <h2>employee Table</h2>
     </div>
   )
 }
 
-export default EmployeeTable
+export default employeeTable

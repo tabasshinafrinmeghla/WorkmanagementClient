@@ -5,11 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { loginUser} from "@/src/services/auth.api";
-import { registerUser } from "@/src/services/auth.api";
-// import { loginUser, registerUser } from "@/src/services/auth.api";
-
-
+import { loginUser, registerUser } from "@/src/services/auth.api";
 
 interface AxiosErrorResponse {
   response?: {
@@ -26,7 +22,7 @@ export default function LoginPage() {
     name: "",
     email: "",
     password: "",
-    role: "employee",
+    role: "employees",
   });
 
   const handleChange = (
@@ -42,32 +38,44 @@ export default function LoginPage() {
     e.preventDefault();
 
     try {
+      // ✅ REGISTER
       if (isRegister) {
-        const res = await registerUser (formData);
+        const res = await registerUser(formData);
 
         alert("Registration Successful");
         console.log(res);
+
         setIsRegister(false);
         return;
       }
 
-      const res = await loginUser ({
+      // ✅ LOGIN
+      const res = await loginUser({
         email: formData.email,
         password: formData.password,
       });
 
+      // ✅ store data
       localStorage.setItem("token", res.token);
+      localStorage.setItem("user", JSON.stringify(res.user));
+
       alert("Login Successful");
       console.log(res);
 
-      window.location.href = "/dashboard";
+      // ✅ role-based redirect
+      if (res.user.role === "admin") {
+        window.location.href = "/admin";
+      } else if (res.user.role === "hr") {
+        window.location.href = "/hr";
+      } else {
+        window.location.href = "/employees";
+      }
     } catch (error: unknown) {
-      // Safely check if error is an object and parse its message
       const err = error as AxiosErrorResponse;
-      
+
       alert(
-        err?.response?.data?.message || 
-        "Something went wrong"
+        err?.response?.data?.message ||
+          "Something went wrong"
       );
     }
   };
@@ -80,6 +88,8 @@ export default function LoginPage() {
         </h1>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+
+          {/* REGISTER ONLY FIELDS */}
           {isRegister && (
             <>
               <div>
@@ -98,14 +108,17 @@ export default function LoginPage() {
                   name="role"
                   className="w-full border rounded-md p-2"
                   onChange={handleChange}
+                  value={formData.role}
                 >
-                  <option value="employee">Employee</option>
+                  <option value="employee">employee</option>
                   <option value="admin">Admin</option>
+                  <option value="hr">HR</option>
                 </select>
               </div>
             </>
           )}
 
+          {/* EMAIL */}
           <div>
             <Label>Email</Label>
             <Input
@@ -117,6 +130,7 @@ export default function LoginPage() {
             />
           </div>
 
+          {/* PASSWORD */}
           <div>
             <Label>Password</Label>
             <Input
@@ -128,11 +142,13 @@ export default function LoginPage() {
             />
           </div>
 
+          {/* SUBMIT */}
           <Button type="submit" className="w-full">
             {isRegister ? "Register" : "Login"}
           </Button>
         </form>
 
+        {/* TOGGLE */}
         <div className="mt-4 text-center">
           <button
             className="text-blue-600 text-sm"
