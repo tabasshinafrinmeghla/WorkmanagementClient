@@ -22,23 +22,23 @@ export default function LoginPage() {
     name: "",
     email: "",
     password: "",
-    role: "employees",
+    role: "employee",
   });
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
-    setFormData({
-      ...formData,
+    setFormData((prev) => ({
+      ...prev,
       [e.target.name]: e.target.value,
-    });
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     try {
-      // ✅ REGISTER
+      // REGISTER
       if (isRegister) {
         const res = await registerUser(formData);
 
@@ -46,27 +46,36 @@ export default function LoginPage() {
         console.log(res);
 
         setIsRegister(false);
+        setFormData({
+          name: "",
+          email: "",
+          password: "",
+          role: "employee",
+        });
+
         return;
       }
 
-      // ✅ LOGIN
+      // LOGIN
       const res = await loginUser({
         email: formData.email,
         password: formData.password,
       });
 
-      // ✅ store data
+      // store auth
       localStorage.setItem("token", res.token);
       localStorage.setItem("user", JSON.stringify(res.user));
 
       alert("Login Successful");
       console.log(res);
 
-      // ✅ role-based redirect
-      if (res.user.role === "admin") {
+      // ✅ ROLE BASED REDIRECT (FIXED)
+      const role = res.user.role;
+
+      if (role === "admin") {
         window.location.href = "/admin";
-      } else if (res.user.role === "hr") {
-        window.location.href = "/hr";
+      } else if (role === "teamLead") {
+        window.location.href = "/team-lead";
       } else {
         window.location.href = "/employees";
       }
@@ -74,8 +83,7 @@ export default function LoginPage() {
       const err = error as AxiosErrorResponse;
 
       alert(
-        err?.response?.data?.message ||
-          "Something went wrong"
+        err?.response?.data?.message || "Something went wrong"
       );
     }
   };
@@ -88,8 +96,7 @@ export default function LoginPage() {
         </h1>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-
-          {/* REGISTER ONLY FIELDS */}
+          {/* NAME + ROLE (REGISTER ONLY) */}
           {isRegister && (
             <>
               <div>
@@ -98,6 +105,7 @@ export default function LoginPage() {
                   name="name"
                   placeholder="John Doe"
                   onChange={handleChange}
+                  value={formData.name}
                   required
                 />
               </div>
@@ -110,9 +118,9 @@ export default function LoginPage() {
                   onChange={handleChange}
                   value={formData.role}
                 >
-                  <option value="employee">employee</option>
+                  <option value="employee">Employee</option>
+                  <option value="teamLead">Team Lead</option>
                   <option value="admin">Admin</option>
-                  <option value="hr">HR</option>
                 </select>
               </div>
             </>
@@ -126,6 +134,7 @@ export default function LoginPage() {
               name="email"
               placeholder="admin@gmail.com"
               onChange={handleChange}
+              value={formData.email}
               required
             />
           </div>
@@ -138,6 +147,7 @@ export default function LoginPage() {
               name="password"
               placeholder="******"
               onChange={handleChange}
+              value={formData.password}
               required
             />
           </div>
