@@ -77,7 +77,7 @@ export default function LoginPage() {
       } else if (role === "teamLead") {
         window.location.href = "/team-lead";
       } else {
-        window.location.href = "/employees";
+        window.location.href = "/employee";
       }
     } catch (error: unknown) {
       const err = error as AxiosErrorResponse;

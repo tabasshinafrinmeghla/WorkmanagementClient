@@ -1,9 +1,17 @@
+// app/providers.tsx
 "use client";
 
+import React from "react";
 import { AuthProvider } from "@/src/context/AuthContext";
-
-// import { AuthProvider } from "@/context/AuthContext";
+import { Provider as ReduxProvider } from "react-redux";
+import { store } from "../src/store"; // আপনার স্টোরের পাথ
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  return <AuthProvider>{children}</AuthProvider>;
-}
+  return (
+    <ReduxProvider store={store}>
+      <AuthProvider>
+        {children}
+      </AuthProvider>
+    </ReduxProvider>
+  );
+} 
