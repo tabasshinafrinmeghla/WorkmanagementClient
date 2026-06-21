@@ -4,28 +4,32 @@ import { useAuth } from "@/src/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-interface ProtectedRouteProps {
-  children: React.ReactNode;
-  allowedRoles: string[];
-}
-
 export default function ProtectedRoute({
   children,
   allowedRoles,
-}: ProtectedRouteProps) {
-  const { user } = useAuth();
+}: {
+  children: React.ReactNode;
+  allowedRoles: string[];
+}) {
+  const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
+    if (loading) return;
+
     if (!user) {
-      router.push("/login");
+      router.replace("/login");
       return;
     }
 
     if (!allowedRoles.includes(user.role)) {
-      router.push("/unauthorized");
+      router.replace("/unauthorized");
     }
-  }, [user, router, allowedRoles]);
+  }, [user, loading, router, allowedRoles]);
+
+  if (loading) {
+    return <p>Loading...</p>;
+  }
 
   if (!user) {
     return null;

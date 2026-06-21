@@ -1,4 +1,4 @@
-"use client";
+
 
 import ProtectedRoute from "@/src/ProtectedRoute";
 
