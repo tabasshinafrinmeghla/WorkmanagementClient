@@ -1,12 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import ProtectedRoute from "@/src/ProtectedRoute";
 import { taskService, Task, CreateTaskInput } from "@/src/services/task.api";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// ─── Status badge ────────────────────────────────────────────────────────────
+// ─── Shadcn UI Imports ──────────────────────────────────────────────────────
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+// ─── Hydration Mismatch Safety Helpers ──────────────────────────────────────
+const emptySubscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
+
+// ─── Status Badge Component ──────────────────────────────────────────────────
 const STATUS_STYLES: Record<string, string> = {
   "On process": "bg-orange-100 text-orange-600 border border-orange-300",
   Complete: "bg-green-100 text-green-600 border border-green-300",
@@ -23,7 +36,7 @@ function StatusBadge({ status }: { status: Task["status"] }) {
   );
 }
 
-// ─── Modal ───────────────────────────────────────────────────────────────────
+// ─── Upsert Task Modal Component ─────────────────────────────────────────────
 interface ModalProps {
   open: boolean;
   onClose: () => void;
@@ -154,7 +167,7 @@ function TaskModal({ open, onClose, onSave, initial }: ModalProps) {
   );
 }
 
-// ─── Confirm Delete Modal ─────────────────────────────────────────────────────
+// ─── Confirm Delete Modal Component ───────────────────────────────────────────
 function ConfirmModal({
   open,
   onClose,
@@ -192,20 +205,24 @@ function ConfirmModal({
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Page View ──────────────────────────────────────────────────────────
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Modals
+  // Safe client-side mount flag evaluation
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    getClientSnapshot,
+    getServerSnapshot
+  );
+
+  // Modal workflows state
   const [modalOpen, setModalOpen] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  // Row action dropdown
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
 
   const fetchTasks = useCallback(async (q?: string) => {
     setLoading(true);
@@ -221,6 +238,7 @@ export default function TasksPage() {
   }, []);
 
   useEffect(() => {
+    if (!mounted) return;
     const loadInitialTasks = async () => {
       setLoading(true);
       setError("");
@@ -235,22 +253,16 @@ export default function TasksPage() {
     };
 
     void loadInitialTasks();
-  }, []);
+  }, [mounted]);
 
-  // Debounced search
+  // Debounced query logic
   useEffect(() => {
+    if (!mounted) return;
     const t = setTimeout(() => fetchTasks(search || undefined), 350);
     return () => clearTimeout(t);
-  }, [search, fetchTasks]);
+  }, [search, fetchTasks, mounted]);
 
-  // Close menu on outside click
-  useEffect(() => {
-    const handler = () => setOpenMenu(null);
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
-  }, []);
-
-  // ── CRUD handlers ──
+  // ── CRUD Request Hooks ──
   const handleSave = async (data: CreateTaskInput) => {
     if (editTask) {
       await taskService.updateTask(editTask._id, data);
@@ -269,7 +281,7 @@ export default function TasksPage() {
     fetchTasks(search || undefined);
   };
 
-  // ── PDF export ──
+  // ── PDF Layout Builder ──
   const handleDownloadPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(14);
@@ -286,13 +298,12 @@ export default function TasksPage() {
         t.status,
       ]),
       styles: { fontSize: 10 },
-      headStyles: { fillColor: [22, 163, 74] }, // green-600
+      headStyles: { fillColor: [22, 163, 74] },
     });
 
     doc.save("tasks.pdf");
   };
 
-  // ── Format date: 2026-05-01 → 01/05/2026 ──
   const formatDate = (raw: string) => {
     if (!raw) return "";
     const [y, m, d] = raw.split("-");
@@ -300,12 +311,15 @@ export default function TasksPage() {
     return raw;
   };
 
+  if (!mounted) {
+    return null;
+  }
+
   return (
     <ProtectedRoute allowedRoles={["admin", "employee"]}>
       <div className="min-h-screen bg-gray-50 p-6">
-        {/* ── Header bar ── */}
+        {/* ── Header Area ── */}
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
-          {/* Create button */}
           <button
             onClick={() => {
               setEditTask(null);
@@ -317,7 +331,7 @@ export default function TasksPage() {
           </button>
 
           <div className="flex items-center gap-2 flex-1 justify-end max-w-md">
-            {/* Search */}
+            {/* Search Input */}
             <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -332,7 +346,7 @@ export default function TasksPage() {
               />
             </div>
 
-            {/* Download PDF */}
+            {/* Print Export Action */}
             <button
               onClick={handleDownloadPDF}
               title="Download as PDF"
@@ -345,9 +359,8 @@ export default function TasksPage() {
           </div>
         </div>
 
-        {/* ── Table ── */}
+        {/* ── Core Grid Layout Table ── */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          {/* Table header */}
           <div className="grid grid-cols-[2rem_1fr_1fr_130px_120px_48px] gap-3 px-4 py-3 border-b border-gray-100 text-sm font-semibold text-gray-700">
             <span></span>
             <span>Task</span>
@@ -357,9 +370,7 @@ export default function TasksPage() {
             <span></span>
           </div>
 
-          {/* Rows */}
           {loading ? (
-            // Skeleton rows
             Array.from({ length: 7 }).map((_, i) => (
               <div
                 key={i}
@@ -376,7 +387,6 @@ export default function TasksPage() {
           ) : error ? (
             <div className="text-center py-12 text-red-500 text-sm">{error}</div>
           ) : tasks.length === 0 ? (
-            // Empty + filler rows matching the design
             <>
               <div className="text-center py-8 text-gray-400 text-sm">
                 No tasks found.
@@ -398,53 +408,43 @@ export default function TasksPage() {
                   <span>{formatDate(task.date)}</span>
                   <StatusBadge status={task.status} />
 
-                  {/* Action menu */}
-                  <div className="relative flex justify-center">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenu(openMenu === task._id ? null : task._id);
-                      }}
-                      className="p-1 rounded hover:bg-gray-100 text-gray-500 transition"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <circle cx="10" cy="4" r="1.5" />
-                        <circle cx="10" cy="10" r="1.5" />
-                        <circle cx="10" cy="16" r="1.5" />
-                      </svg>
-                    </button>
-
-                    {openMenu === task._id && (
-                      <div
-                        className="absolute right-0 top-8 z-20 bg-white rounded-lg shadow-lg border border-gray-100 min-w-[120px] py-1"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  {/* ── Shadcn UI Dropdown Action Panel ── */}
+                  <div className="flex justify-center">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button className="p-1 rounded hover:bg-gray-100 text-gray-500 transition focus:outline-none">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <circle cx="10" cy="4" r="1.5" />
+                            <circle cx="10" cy="10" r="1.5" />
+                            <circle cx="10" cy="16" r="1.5" />
+                          </svg>
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-32 bg-white border border-gray-100 shadow-md rounded-lg py-1">
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer focus:outline-none"
                           onClick={() => {
                             setEditTask(task);
                             setModalOpen(true);
-                            setOpenMenu(null);
                           }}
                         >
                           ✏️ Edit
-                        </button>
-                        <button
-                          className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-500 hover:bg-red-50"
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 px-4 py-2 text-sm text-red-500 hover:bg-red-50 cursor-pointer focus:outline-none"
                           onClick={() => {
                             setDeleteId(task._id);
-                            setOpenMenu(null);
                           }}
                         >
                           🗑️ Delete
-                        </button>
-                      </div>
-                    )}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
               ))}
 
-              {/* Filler rows to match design (always show ~7 rows total) */}
+              {/* Layout Compensation Spacers */}
               {tasks.length < 7 &&
                 Array.from({ length: 7 - tasks.length }).map((_, i) => (
                   <div
@@ -457,7 +457,7 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Modals Containers */}
       <TaskModal
         key={`${modalOpen}-${editTask?._id ?? "new"}`}
         open={modalOpen}
