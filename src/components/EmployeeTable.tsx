@@ -81,7 +81,6 @@ function TaskModal({ open, onClose, onSave, initial }: ModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-      {/* FIX: Swapped to card and popover token systems for background & border */}
       <div className="bg-card dark:bg-neutral-900 border border-border rounded-xl shadow-xl w-full max-w-md p-6">
         <h2 className="text-lg font-semibold text-foreground mb-5">
           {initial ? "Edit Task" : "Create Task"}
@@ -203,6 +202,8 @@ function ConfirmModal({
 export default function EmployeeTable() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [dateFilter, setDateFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -216,11 +217,12 @@ export default function EmployeeTable() {
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const fetchTasks = useCallback(async (q?: string) => {
+  // Combines query string filters for the backend API safely
+  const fetchTasks = useCallback(async (queryStr?: string) => {
     setLoading(true);
     setError("");
     try {
-      const data = await taskService.getTasks(q);
+      const data = await taskService.getTasks(queryStr);
       setTasks(data);
     } catch {
       setError("Failed to load tasks. Please try again.");
@@ -229,30 +231,22 @@ export default function EmployeeTable() {
     }
   }, []);
 
+  // Debounced Effect handling text search, status select changes, and date configurations
   useEffect(() => {
     if (!mounted) return;
 
-    const loadTasks = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await taskService.getTasks();
-        setTasks(data);
-      } catch {
-        setError("Failed to load tasks. Please try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
+    const timeoutId = setTimeout(() => {
+      const params = new URLSearchParams();
+      if (search.trim()) params.append("q", search.trim());
+      if (statusFilter !== "All") params.append("status", statusFilter);
+      if (dateFilter) params.append("date", dateFilter);
 
-    void loadTasks();
-  }, [mounted]);
+      const queryString = params.toString() ? `?${params.toString()}` : undefined;
+      fetchTasks(queryString);
+    }, 350);
 
-  useEffect(() => {
-    if (!mounted) return;
-    const t = setTimeout(() => fetchTasks(search || undefined), 350);
-    return () => clearTimeout(t);
-  }, [search, fetchTasks, mounted]);
+    return () => clearTimeout(timeoutId);
+  }, [search, statusFilter, dateFilter, fetchTasks, mounted]);
 
   const handleSave = async (data: CreateTaskInput) => {
     if (editTask) {
@@ -262,14 +256,23 @@ export default function EmployeeTable() {
     }
     setModalOpen(false);
     setEditTask(null);
-    fetchTasks(search || undefined);
+    // Re-triggers with existing states
+    const params = new URLSearchParams();
+    if (search.trim()) params.append("q", search.trim());
+    if (statusFilter !== "All") params.append("status", statusFilter);
+    if (dateFilter) params.append("date", dateFilter);
+    fetchTasks(params.toString() ? `?${params.toString()}` : undefined);
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
     await taskService.deleteTask(deleteId);
     setDeleteId(null);
-    fetchTasks(search || undefined);
+    const params = new URLSearchParams();
+    if (search.trim()) params.append("q", search.trim());
+    if (statusFilter !== "All") params.append("status", statusFilter);
+    if (dateFilter) params.append("date", dateFilter);
+    fetchTasks(params.toString() ? `?${params.toString()}` : undefined);
   };
 
   const handleDownloadPDF = () => {
@@ -305,38 +308,72 @@ export default function EmployeeTable() {
 
   return (
     <>
-      {/* ── Header Area ── */}
+      {/* ── Header Area with Search and Advanced Filters ── */}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <button
           onClick={() => {
             setEditTask(null);
             setModalOpen(true);
           }}
-          className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-sm"
+          className="bg-green-600 hover:bg-green-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
         >
           Create task
         </button>
 
-        <div className="flex items-center gap-2 flex-1 justify-end max-w-md">
-          <div className="relative flex-1">
+        <div className="flex items-center gap-2 flex-1 justify-end min-w-[320px] max-w-2xl flex-wrap sm:flex-nowrap">
+          {/* Search Box Input */}
+          <div className="relative flex-1 min-w-[150px]">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
               </svg>
             </span>
-            {/* FIX: Search input fields now switch colors correctly via bg-muted & border-border */}
             <input
               className="w-full pl-9 pr-3 py-2 border border-border rounded-lg text-sm bg-muted text-foreground focus:outline-none focus:ring-2 focus:ring-green-400 focus:bg-card transition"
-              placeholder="Search"
+              placeholder="Search tasks..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
 
+          {/* Status Sorting Dropdown Menu */}
+          <select
+            className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-muted text-foreground transition max-w-[140px] cursor-pointer"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="All">All Status</option>
+            <option value="Pending">Pending</option>
+            <option value="On process">On process</option>
+            <option value="Complete">Complete</option>
+          </select>
+
+          {/* Date Selector Filter */}
+          <input
+            type="date"
+            className="border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-muted text-foreground scheme-light dark:scheme-dark transition cursor-pointer"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+          />
+
+          {/* Reset Filters Shortcut Button (Only visible if dynamic parameters active) */}
+          {(statusFilter !== "All" || dateFilter !== "") && (
+            <button
+              onClick={() => {
+                setStatusFilter("All");
+                setDateFilter("");
+              }}
+              className="text-xs font-medium text-red-500 hover:text-red-600 px-2 py-2 border border-transparent hover:border-red-200 dark:hover:border-red-950 rounded-md transition whitespace-nowrap"
+            >
+              Clear
+            </button>
+          )}
+
+          {/* Download PDF Action Trigger */}
           <button
             onClick={handleDownloadPDF}
             title="Download as PDF"
-            className="p-2 border border-green-500 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50/50 dark:hover:bg-green-950/20 transition"
+            className="p-2 border border-green-500 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50/50 dark:hover:bg-green-950/20 transition shrink-0"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" />
@@ -346,7 +383,6 @@ export default function EmployeeTable() {
       </div>
 
       {/* ── Core Grid Layout Table ── */}
-      {/* FIX: Container now reads your custom CSS theme variables gracefully */}
       <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="grid grid-cols-[2rem_1fr_1fr_130px_120px_48px] gap-3 px-4 py-3 border-b border-border text-sm font-semibold text-muted-foreground bg-muted/30">
           <span></span>
@@ -404,7 +440,6 @@ export default function EmployeeTable() {
                         </svg>
                       </button>
                     </DropdownMenuTrigger>
-                    {/* FIX: Dropdowns now receive correct adaptive popover stylings */}
                     <DropdownMenuContent align="end" className="w-32 bg-popover border border-border shadow-md rounded-lg py-1 text-popover-foreground">
                       <DropdownMenuItem
                         className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted cursor-pointer focus:outline-none"
@@ -435,7 +470,7 @@ export default function EmployeeTable() {
         )}
       </div>
 
-      {/* Modals */}
+      {/* Modals Containers */}
       <TaskModal
         key={`${modalOpen}-${editTask?._id ?? "new"}`}
         open={modalOpen}
