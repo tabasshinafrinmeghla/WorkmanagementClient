@@ -28,18 +28,16 @@ const headers = () => ({
 });
 
 export const taskService = {
-  // Fetch all tasks, optional search
-  async getTasks(search?: string): Promise<Task[]> {
-    const url = search
-      ? `${API_BASE}/tasks?search=${encodeURIComponent(search)}`
-      : `${API_BASE}/tasks`;
+  // queryStr is the full pre-built query string from EmployeeTable,
+  // e.g. "?q=foo&status=Pending&date=2025-06" — forwarded as-is to the backend.
+  async getTasks(queryStr?: string): Promise<Task[]> {
+    const url = `${API_BASE}/tasks${queryStr ?? ""}`;
     const res = await fetch(url, { headers: headers() });
     if (!res.ok) throw new Error("Failed to fetch tasks");
     const json = await res.json();
     return json.data;
   },
 
-  // Create a new task
   async createTask(data: CreateTaskInput): Promise<Task> {
     const res = await fetch(`${API_BASE}/tasks`, {
       method: "POST",
@@ -51,7 +49,6 @@ export const taskService = {
     return json.data;
   },
 
-  // Update an existing task
   async updateTask(id: string, data: Partial<CreateTaskInput>): Promise<Task> {
     const res = await fetch(`${API_BASE}/tasks/${id}`, {
       method: "PUT",
@@ -63,7 +60,6 @@ export const taskService = {
     return json.data;
   },
 
-  // Delete a task
   async deleteTask(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/tasks/${id}`, {
       method: "DELETE",

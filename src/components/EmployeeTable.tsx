@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from "react";
 import { taskService, Task, CreateTaskInput } from "@/src/services/task.api";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-// ─── Shadcn UI Imports ──────────────────────────────────────────────────────
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,11 +17,35 @@ const emptySubscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 
-// ─── Status Badge Component ──────────────────────────────────────────────────
+// ─── Static Constants (never change, safe at module level) ───────────────────
+const MONTHS = [
+  { value: "01", label: "Jan" },
+  { value: "02", label: "Feb" },
+  { value: "03", label: "Mar" },
+  { value: "04", label: "Apr" },
+  { value: "05", label: "May" },
+  { value: "06", label: "Jun" },
+  { value: "07", label: "Jul" },
+  { value: "08", label: "Aug" },
+  { value: "09", label: "Sep" },
+  { value: "10", label: "Oct" },
+  { value: "11", label: "Nov" },
+  { value: "12", label: "Dec" },
+];
+
+// Days 01–31 — static, safe at module level
+const DAYS = Array.from({ length: 31 }, (_, i) =>
+  String(i + 1).padStart(2, "0")
+);
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 const STATUS_STYLES: Record<string, string> = {
-  "On process": "bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 border border-orange-300 dark:border-orange-900/60",
-  Complete: "bg-green-100 dark:bg-green-950/40 text-green-600 dark:text-green-400 border border-green-300 dark:border-green-900/60",
-  Pending: "bg-red-100 dark:bg-red-950/40 text-red-500 dark:text-red-400 border border-red-300 dark:border-red-900/60",
+  "On process":
+    "bg-orange-100 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 border border-orange-300 dark:border-orange-900/60",
+  Complete:
+    "bg-green-100 dark:bg-green-950/40 text-green-600 dark:text-green-400 border border-green-300 dark:border-green-900/60",
+  Pending:
+    "bg-red-100 dark:bg-red-950/40 text-red-500 dark:text-red-400 border border-red-300 dark:border-red-900/60",
 };
 
 function StatusBadge({ status }: { status: Task["status"] }) {
@@ -35,7 +58,7 @@ function StatusBadge({ status }: { status: Task["status"] }) {
   );
 }
 
-// ─── Upsert Task Modal Component ─────────────────────────────────────────────
+// ─── Upsert Task Modal ────────────────────────────────────────────────────────
 interface ModalProps {
   open: boolean;
   onClose: () => void;
@@ -102,7 +125,9 @@ function TaskModal({ open, onClose, onSave, initial }: ModalProps) {
           <div>
             <label className="block text-sm font-medium text-muted-foreground mb-1">
               Team Members{" "}
-              <span className="text-neutral-400 dark:text-neutral-500 font-normal">(comma-separated)</span>
+              <span className="text-neutral-400 dark:text-neutral-500 font-normal">
+                (comma-separated)
+              </span>
             </label>
             <input
               className="w-full bg-transparent border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 text-foreground"
@@ -162,7 +187,7 @@ function TaskModal({ open, onClose, onSave, initial }: ModalProps) {
   );
 }
 
-// ─── Confirm Delete Modal Component ───────────────────────────────────────────
+// ─── Confirm Delete Modal ─────────────────────────────────────────────────────
 function ConfirmModal({
   open,
   onClose,
@@ -177,8 +202,12 @@ function ConfirmModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-sm p-6 text-center">
         <div className="text-4xl mb-3">🗑️</div>
-        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Task?</h3>
-        <p className="text-sm text-muted-foreground mb-5">This action cannot be undone.</p>
+        <h3 className="text-lg font-semibold text-foreground mb-2">
+          Delete Task?
+        </h3>
+        <p className="text-sm text-muted-foreground mb-5">
+          This action cannot be undone.
+        </p>
         <div className="flex justify-center gap-3">
           <button
             onClick={onClose}
@@ -198,12 +227,21 @@ function ConfirmModal({
   );
 }
 
-// ─── Main Reusable Component Export ─────────────────────────────────────────
+// ─── Shared select style helper ───────────────────────────────────────────────
+const selectCls =
+  "border border-border rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-muted text-foreground transition cursor-pointer";
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function EmployeeTable() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
-  const [dateFilter, setDateFilter] = useState<string>("");
+
+  // Granular date filter state
+  const [yearFilter, setYearFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [dayFilter, setDayFilter] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -213,11 +251,30 @@ export default function EmployeeTable() {
     getServerSnapshot
   );
 
+  // ✅ HYDRATION FIX: new Date() must only run on the client.
+  // Computing YEARS at module level causes SSR vs client mismatch because
+  // the server and client clocks can differ by a second / timezone.
+  // useMemo with an empty dep array runs once after mount — client-only.
+  const YEARS = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 11 }, (_, i) =>
+      String(currentYear - 10 + i)
+    );
+  }, []);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Combines query string filters for the backend API safely
+  // Build the date query param from the three selectors.
+  // Rules: year required; month optional; day requires month.
+  const buildDateParam = (y: string, m: string, d: string): string => {
+    if (!y) return "";
+    if (!m) return y;            // "YYYY"
+    if (!d) return `${y}-${m}`; // "YYYY-MM"
+    return `${y}-${m}-${d}`;    // "YYYY-MM-DD"
+  };
+
   const fetchTasks = useCallback(async (queryStr?: string) => {
     setLoading(true);
     setError("");
@@ -231,7 +288,6 @@ export default function EmployeeTable() {
     }
   }, []);
 
-  // Debounced Effect handling text search, status select changes, and date configurations
   useEffect(() => {
     if (!mounted) return;
 
@@ -239,14 +295,26 @@ export default function EmployeeTable() {
       const params = new URLSearchParams();
       if (search.trim()) params.append("q", search.trim());
       if (statusFilter !== "All") params.append("status", statusFilter);
-      if (dateFilter) params.append("date", dateFilter);
+
+      const dateParam = buildDateParam(yearFilter, monthFilter, dayFilter);
+      if (dateParam) params.append("date", dateParam);
 
       const queryString = params.toString() ? `?${params.toString()}` : undefined;
       fetchTasks(queryString);
     }, 350);
 
     return () => clearTimeout(timeoutId);
-  }, [search, statusFilter, dateFilter, fetchTasks, mounted]);
+  }, [search, statusFilter, yearFilter, monthFilter, dayFilter, fetchTasks, mounted]);
+
+  // Re-fetch preserving all current filters
+  const refetch = useCallback(() => {
+    const params = new URLSearchParams();
+    if (search.trim()) params.append("q", search.trim());
+    if (statusFilter !== "All") params.append("status", statusFilter);
+    const dateParam = buildDateParam(yearFilter, monthFilter, dayFilter);
+    if (dateParam) params.append("date", dateParam);
+    fetchTasks(params.toString() ? `?${params.toString()}` : undefined);
+  }, [search, statusFilter, yearFilter, monthFilter, dayFilter, fetchTasks]);
 
   const handleSave = async (data: CreateTaskInput) => {
     if (editTask) {
@@ -256,23 +324,14 @@ export default function EmployeeTable() {
     }
     setModalOpen(false);
     setEditTask(null);
-    // Re-triggers with existing states
-    const params = new URLSearchParams();
-    if (search.trim()) params.append("q", search.trim());
-    if (statusFilter !== "All") params.append("status", statusFilter);
-    if (dateFilter) params.append("date", dateFilter);
-    fetchTasks(params.toString() ? `?${params.toString()}` : undefined);
+    refetch();
   };
 
   const handleDelete = async () => {
     if (!deleteId) return;
     await taskService.deleteTask(deleteId);
     setDeleteId(null);
-    const params = new URLSearchParams();
-    if (search.trim()) params.append("q", search.trim());
-    if (statusFilter !== "All") params.append("status", statusFilter);
-    if (dateFilter) params.append("date", dateFilter);
-    fetchTasks(params.toString() ? `?${params.toString()}` : undefined);
+    refetch();
   };
 
   const handleDownloadPDF = () => {
@@ -304,11 +363,20 @@ export default function EmployeeTable() {
     return raw;
   };
 
+  const hasDateFilter = !!(yearFilter || monthFilter || dayFilter);
+  const hasAnyFilter = statusFilter !== "All" || hasDateFilter;
+
+  const clearDateFilters = () => {
+    setYearFilter("");
+    setMonthFilter("");
+    setDayFilter("");
+  };
+
   if (!mounted) return null;
 
   return (
     <>
-      {/* ── Header Area with Search and Advanced Filters ── */}
+      {/* ── Header ── */}
       <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
         <button
           onClick={() => {
@@ -320,12 +388,23 @@ export default function EmployeeTable() {
           Create task
         </button>
 
-        <div className="flex items-center gap-2 flex-1 justify-end min-w-[320px] max-w-2xl flex-wrap sm:flex-nowrap">
-          {/* Search Box Input */}
+        <div className="flex items-center gap-2 flex-1 justify-end flex-wrap sm:flex-nowrap">
+          {/* Search */}
           <div className="relative flex-1 min-w-[150px]">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
+                />
               </svg>
             </span>
             <input
@@ -336,9 +415,9 @@ export default function EmployeeTable() {
             />
           </div>
 
-          {/* Status Sorting Dropdown Menu */}
+          {/* Status */}
           <select
-            className="border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-muted text-foreground transition max-w-[140px] cursor-pointer"
+            className={`${selectCls} max-w-[140px]`}
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -348,20 +427,65 @@ export default function EmployeeTable() {
             <option value="Complete">Complete</option>
           </select>
 
-          {/* Date Selector Filter */}
-          <input
-            type="date"
-            className="border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 bg-muted text-foreground scheme-light dark:scheme-dark transition cursor-pointer"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-          />
+          {/* Year — always available */}
+          <select
+            className={`${selectCls} w-[90px]`}
+            value={yearFilter}
+            onChange={(e) => {
+              setYearFilter(e.target.value);
+              if (!e.target.value) {
+                setMonthFilter("");
+                setDayFilter("");
+              }
+            }}
+          >
+            <option value="">Year</option>
+            {YEARS.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
 
-          {/* Reset Filters Shortcut Button (Only visible if dynamic parameters active) */}
-          {(statusFilter !== "All" || dateFilter !== "") && (
+          {/* Month — requires year */}
+          <select
+            className={`${selectCls} w-[80px]`}
+            value={monthFilter}
+            onChange={(e) => {
+              setMonthFilter(e.target.value);
+              if (!e.target.value) setDayFilter("");
+            }}
+            disabled={!yearFilter}
+          >
+            <option value="">Month</option>
+            {MONTHS.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+
+          {/* Day — requires month */}
+          <select
+            className={`${selectCls} w-[70px]`}
+            value={dayFilter}
+            onChange={(e) => setDayFilter(e.target.value)}
+            disabled={!monthFilter}
+          >
+            <option value="">Day</option>
+            {DAYS.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+
+          {/* Clear all active filters */}
+          {hasAnyFilter && (
             <button
               onClick={() => {
                 setStatusFilter("All");
-                setDateFilter("");
+                clearDateFilters();
               }}
               className="text-xs font-medium text-red-500 hover:text-red-600 px-2 py-2 border border-transparent hover:border-red-200 dark:hover:border-red-950 rounded-md transition whitespace-nowrap"
             >
@@ -369,20 +493,31 @@ export default function EmployeeTable() {
             </button>
           )}
 
-          {/* Download PDF Action Trigger */}
+          {/* Download PDF */}
           <button
             onClick={handleDownloadPDF}
             title="Download as PDF"
             className="p-2 border border-green-500 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-50/50 dark:hover:bg-green-950/20 transition shrink-0"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 10l5 5 5-5M12 15V3"
+              />
             </svg>
           </button>
         </div>
       </div>
 
-      {/* ── Core Grid Layout Table ── */}
+      {/* ── Table ── */}
       <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="grid grid-cols-[2rem_1fr_1fr_130px_120px_48px] gap-3 px-4 py-3 border-b border-border text-sm font-semibold text-muted-foreground bg-muted/30">
           <span></span>
@@ -411,7 +546,9 @@ export default function EmployeeTable() {
           <div className="text-center py-12 text-red-500 text-sm">{error}</div>
         ) : tasks.length === 0 ? (
           <>
-            <div className="text-center py-8 text-muted-foreground text-sm">No tasks found.</div>
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              No tasks found.
+            </div>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-12 border-b border-border bg-muted/10" />
             ))}
@@ -423,9 +560,13 @@ export default function EmployeeTable() {
                 key={task._id}
                 className="grid grid-cols-[2rem_1fr_1fr_130px_120px_48px] gap-3 px-4 py-4 border-b border-border items-center hover:bg-muted/40 transition text-sm text-foreground/90"
               >
-                <span className="text-muted-foreground font-medium">{idx + 1}</span>
+                <span className="text-muted-foreground font-medium">
+                  {idx + 1}
+                </span>
                 <span className="font-medium text-foreground">{task.title}</span>
-                <span className="text-muted-foreground">{task.teamMembers.join(", ")}</span>
+                <span className="text-muted-foreground">
+                  {task.teamMembers.join(", ")}
+                </span>
                 <span>{formatDate(task.date)}</span>
                 <StatusBadge status={task.status} />
 
@@ -433,14 +574,22 @@ export default function EmployeeTable() {
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button className="p-1 rounded hover:bg-muted text-muted-foreground transition focus:outline-none">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="w-5 h-5"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
                           <circle cx="10" cy="4" r="1.5" />
                           <circle cx="10" cy="10" r="1.5" />
                           <circle cx="10" cy="16" r="1.5" />
                         </svg>
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-32 bg-popover border border-border shadow-md rounded-lg py-1 text-popover-foreground">
+                    <DropdownMenuContent
+                      align="end"
+                      className="w-32 bg-popover border border-border shadow-md rounded-lg py-1 text-popover-foreground"
+                    >
                       <DropdownMenuItem
                         className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted cursor-pointer focus:outline-none"
                         onClick={() => {
@@ -464,13 +613,16 @@ export default function EmployeeTable() {
 
             {tasks.length < 7 &&
               Array.from({ length: 7 - tasks.length }).map((_, i) => (
-                <div key={`filler-${i}`} className="h-12 border-b border-border bg-muted/5" />
+                <div
+                  key={`filler-${i}`}
+                  className="h-12 border-b border-border bg-muted/5"
+                />
               ))}
           </>
         )}
       </div>
 
-      {/* Modals Containers */}
+      {/* Modals */}
       <TaskModal
         key={`${modalOpen}-${editTask?._id ?? "new"}`}
         open={modalOpen}
